@@ -11,17 +11,38 @@ screen.clear()
 screen.move_to(0, 0)
 screen.print("Connecting Wi-fi...")
 
-# --- CONFIGURATION ---
-WIFI_SSID = "{WIFI_SSID}"
-WIFI_PASSWORD = "{WIFI_PASSWORD}"
-API_URL = "https://your-app.onrender.com/api/sensor"
-API_KEY = "{API_KEY}"
-
 # Set how many readings to store before sending the bulk POST
 BUFFER_LIMIT = 120
 
 # Setup Hardware UART for PMS7003 (Using GP5 for RX)
 uart = machine.UART(1, baudrate=9600, tx=machine.Pin(4), rx=machine.Pin(5))
+
+# Function to read .env files manually
+def load_env():
+    env_vars = {}
+    try:
+        with open('.env') as f:
+            for line in f:
+                # Skip empty lines and comments
+                if not line.strip() or line.startswith('#'):
+                    continue
+                # Split the line at the first equals sign
+                if '=' in line:
+                    key, value = line.strip().split('=', 1)
+                    # Remove any accidental quotes around the password
+                    env_vars[key] = value.strip('"\'')
+        return env_vars
+    except OSError:
+        print("Error: No .env file found on the Pico!")
+        return {}
+
+secrets = load_env()
+
+# --- CONFIGURATION ---
+WIFI_SSID = secrets.get("WIFI_SSID", "default_network")
+WIFI_PASSWORD = secrets.get("WIFI_PASSWORD", "default_password")
+API_URL = "https://your-app.onrender.com/api/sensor"
+API_KEY = secrets.get("API_KEY", "default_key")
 
 def connect_wifi():
     wlan = network.WLAN(network.STA_IF)
@@ -40,7 +61,7 @@ def connect_wifi():
     print("Wi-Fi Connected! IP:", wlan.ifconfig()[0])
 
 def sync_time():
-    sreen.move_to(0, 1)
+    screen.move_to(0, 1)
     screen.print("Syncing Time...")
     try:
         ntptime.settime() # Fetches UTC time from the internet
