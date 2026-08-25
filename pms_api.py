@@ -39,8 +39,6 @@ def init_db():
         user=db_config['user'],
         password=db_config['password'],
         database="pms_data",
-        ssl_verify_cert=True,
-        ssl_verify_identity=True
     )
     c = conn.cursor()
     c.execute("CREATE DATABASE IF NOT EXISTS pms_data")
