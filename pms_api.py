@@ -190,7 +190,7 @@ def home():
 
             // 3. Run immediately on load, then poll every 60 seconds (60000 ms)
             fetchData();
-            setInterval(fetchData, 500);
+            setInterval(fetchData, 1000);
         </script>
     </body>
     </html>

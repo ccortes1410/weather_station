@@ -8,9 +8,10 @@ from lcd import LCD
 
 # Give the board 5 seconds to breathe on boot 
 # so you can always recover the COM port if something fails!
-time.sleep(5) 
 
 print("Booting up weather station...")
+time.sleep(5) 
+
 
 
 # Initialize the LCD with our exact wiring pins
