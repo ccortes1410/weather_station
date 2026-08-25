@@ -147,17 +147,6 @@ try:
                     'pm10': pm10
                 }
 
-                try:
-                    headers = {"Content-Type": "application/json", "X-API-Key": API_KEY}
-                    response = urequests.post(API_URL, json=live_data, headers=headers)
-                    response.close()
-                    screen.move_to(19, 3)
-                    screen.print("^")
-
-                except Exception as e:
-                    screen.move_to(19, 3)
-                    screen.print("-")
-                    
                 # Append raw reading to the buffer list
                 data_buffer.append({
                     "timestamp": time_str,
@@ -165,6 +154,23 @@ try:
                     "pm25": pm25,
                     "pm10": pm10
                 })
+
+                payload = {
+                    'data_buffer': data_buffer,
+                    'live_data': live_data
+                }
+
+                try:
+                    headers = {"Content-Type": "application/json", "X-API-Key": API_KEY}
+                    response = urequests.post(API_URL, json=payload, headers=headers)
+                    response.close()
+                    screen.move_to(19, 3)
+                    screen.print("^")
+
+                except Exception as e:
+                    screen.move_to(19, 3)
+                    screen.print("-")
+
 
                 # Check if buffer reached the limit to trigger the bulk POST
                 if len(data_buffer) >= BUFFER_LIMIT:
@@ -175,7 +181,7 @@ try:
 
                     try:
                         # Send the entire list directly to my Flask API:
-                        response = urequests.post(API_URL, json=data_buffer, headers=headers)
+                        response = urequests.post(API_URL, json=payload, headers=headers)
                         response.close()
 
                         # Only clear the buffer if the POST was successful
