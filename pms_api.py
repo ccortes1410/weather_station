@@ -1,20 +1,31 @@
+import os
 from flask import Flask, request, jsonify
 import mysql.connector
 import time
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
+
 
 # --- NEW GLOBAL VARIABLES ---
 latest_live_data = None
 data_buffer = []
 live_chart_buffer = []
 
+# Now you can safely pull your secrets using os.environ.get()
+API_SECRET_KEY = os.environ.get("API_KEY", "fallback_default_key")
+TIDB_HOST = os.environ.get("DB_HOST")
+TIDB_USER = os.environ.get("DB_USER")
+TIDB_PASSWORD = os.environ.get("DB_PASSWORD")
+
 # --- UPDATE THESE WITH YOUR MYSQL CREDENTIALS ---
 db_config = {
-    'host': 'localhost',
-    'user': 'root',        # Change this if you use a different user
-    'password': 'Cc.198422231',         # Enter your MySQL password here
+    'host': '{TIDB_HOST}',
+    'user': '{TIDB_USER}',        # Change this if you use a different user
+    'password': '{TIDB_PASSWORD}',         # Enter your MySQL password here
     'database': 'pms_data'
 }
 
