@@ -139,7 +139,8 @@ try:
                 # Format exactly like my MySQL database expects: YYYY-MM-DD HH:MM:SS
                 time_str = f"{t[0]}-{t[1]:02d}-{t[2]:02d} {t[3]:02d}:{t[4]:02d}:{t[5]:02d}"
 
-                print(f"[{time_str}] PM1.0: {pm1},  PM2.5: {pm25},  PM10: {pm10}")
+                # print(f"[{time_str}] PM1.0: {pm1},  PM2.5: {pm25},  PM10: {pm10}")
+                
                 live_data = {
                     'timestamp': time_str,
                     'pm1': pm1,
@@ -147,6 +148,7 @@ try:
                     'pm10': pm10
                 }
 
+                # print(live_data)
                 # Append raw reading to the buffer list
                 data_buffer.append({
                     "timestamp": time_str,
@@ -160,6 +162,7 @@ try:
                     'live_data': live_data
                 }
 
+                print(payload)
                 try:
                     headers = {"Content-Type": "application/json", "X-API-Key": API_KEY}
                     response = urequests.post(API_URL, json=payload, headers=headers)

@@ -200,7 +200,7 @@ def receive_data():
     global latest_live_data, last_db_write
     data = request.get_json()
 
-    if not data or data['live_data']['pm1'] not in data or data['live_data']['pm25'] not in data or data['live_data']['pm10'] not in data:
+    if not data or data.live_data['pm1'] not in data or data.live_data['pm25'] not in data or data.live_data['pm10'] not in data:
         return jsonify({"error": "Invalid payload"}), 400
 
     current_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -208,14 +208,14 @@ def receive_data():
     # 1. Update live memory for the web dashboard (every second)
     latest_live_data = {
         'time_full': current_time_str,
-        'pm1': data['pm1'],
-        'pm25': data['pm25'],
-        'pm10': data['pm10']
+        'pm1': data.live_data['pm1'],
+        'pm25': data.live_data['pm25'],
+        'pm10': data.live_data['pm10']
     }
 
     # 2. Add the current reading to our RAM buffer
     # Notice we are using a Tuple ( ) inside the list for MySQL formatting
-    data_buffer = data['data_buffer']
+    data_buffer = data.data_buffer
 
     # data_buffer.append({
     #     'timestamp': current_time_str, 
@@ -230,9 +230,9 @@ def receive_data():
     time_short = current_time_str.split(' ')[1] # Get the HH:MM:SS
     live_chart_buffer.append({
         'time_short': time_short,
-        'pm1': int(data['live_data']['pm1']),
-        'pm25': int(data['live_data']['pm25']),
-        'pm10': int(data['live_data']['pm10'])
+        'pm1': int(data.live_data['pm1']),
+        'pm25': int(data.live_data['pm25']),
+        'pm10': int(data.live_data['pm10'])
     })
 
     if len(live_chart_buffer) > 300 :
