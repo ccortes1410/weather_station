@@ -1,0 +1,7 @@
+# Ignore passwords and sensitive data
+.env
+
+# Ignore Python virtual enviroments and cache
+venv/
+env/
+__pycache__/
