@@ -28,7 +28,7 @@ db_config = {
     'user': '{TIDB_USER}',        # Change this if you use a different user
     'password': '{TIDB_PASSWORD}',         # Enter your MySQL password here
     'database': 'pms_data',
-    'port': 4000,
+    'port': int(4000),
     'ssl_verify_cert': True,
     'ssl_verify_identity': True,
     'ssl_ca': certifi.where()
