@@ -131,6 +131,7 @@ def receive_data():
             print(f"MySQL Error: {err}")
             return jsonify({"error": "Database error"}), 400
 
+    return jsonify({"error": "Format unknown"}), 400
 # --------------------------------------------
 #  HTML VIEWS
 # --------------------------------------------    
