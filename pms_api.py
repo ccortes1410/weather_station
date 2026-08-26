@@ -1,12 +1,12 @@
 import os
-from flask import Flask, request, jsonify
-import mysql.connector
-import time
-from datetime import datetime
 from dotenv import load_dotenv
-import certifi
+
 
 load_dotenv()
+from flask import Flask, request, jsonify
+import mysql.connector
+from datetime import datetime
+import certifi
 
 app = Flask(__name__)
 
@@ -17,10 +17,10 @@ data_buffer = []
 live_chart_buffer = []
 
 # Now you can safely pull your secrets using os.environ.get()
-API_SECRET_KEY = os.environ.get("API_KEY", "fallback_default_key")
-TIDB_HOST = os.environ.get("DB_HOST")
-TIDB_USER = os.environ.get("DB_USER")
-TIDB_PASSWORD = os.environ.get("DB_PASSWORD")
+API_SECRET_KEY = os.getenv("API_KEY", "fallback_default_key")
+TIDB_HOST = os.getenv("DB_HOST")
+TIDB_USER = os.getenv("DB_USER")
+TIDB_PASSWORD = os.getenv("DB_PASSWORD")
 
 # --- UPDATE THESE WITH YOUR MYSQL CREDENTIALS ---
 db_config = {
@@ -44,30 +44,6 @@ live_chart_buffer = []
 
 def get_db_connection():
     return mysql.connector.connect(**db_config)
-
-# def init_db():
-#     # Connect without specifying the database so we can create it if it's missing
-#     conn = mysql.connector.connect(
-#         host=db_config['host'],
-#         user=db_config['user'],
-#         password=db_config['password'],
-#         database="pms_data",
-#     )
-#     c = conn.cursor()
-#     c.execute("CREATE DATABASE IF NOT EXISTS pms_data")
-#     c.execute("USE pms_data")
-
-#     current_day = datetime.now().strftime('%Y-%m-%d')
-
-#     # Create the table
-#     c.execute('''CREATE TABLE IF NOT EXISTS readings
-#                  (id INT AUTO_INCREMENT PRIMARY KEY,
-#                   timestamp DATETIME,
-#                   pm1 INT,
-#                   pm25 INT,
-#                   pm10 INT)''')
-#     conn.commit()
-#     conn.close()
 
 @app.route('/api/data', methods=['GET'])
 def get_dashboard_data():

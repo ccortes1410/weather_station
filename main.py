@@ -5,7 +5,7 @@ import ntptime
 import urequests
 from lcd import LCD
 import ujson
-
+import gc
 
 # Give the board 5 seconds to breathe on boot 
 # so you can always recover the COM port if something fails!
@@ -168,32 +168,21 @@ try:
                     'pm10': pm10
                 }
 
-                headers = {"X-API-Key": API_KEY}
-                # print(payload)
-                try:
-                    live_payload = ujson.dumps(live_data)
-                    response = urequests.post(API_URL, json=live_data, headers=headers)
-
-                    if response.status_code in [200, 201]:
-                        screen.move_to(19, 3)
-                        screen.print("^")
-                    response.close()
-                except Exception as e:
-                    screen.move_to(19, 3)
-                    screen.print("-")
-                    print("Live Ping Failed:", e)
-
                 data_buffer.append(live_data)
                 save_buffer_to_flash(data_buffer)
 
                 screen.move_to(15, 3)
                 screen.print(f"{len(data_buffer):2d}")
 
+                headers = {"X-API-Key": API_KEY}
+                # print(payload)
+            
                 # Check if buffer reached the limit to trigger the bulk POST
                 if len(data_buffer) >= BUFFER_LIMIT:
                     screen.move_to(19, 3)
                     screen.print("*") # Show upload indicator
-                    json_payload = ujson.dumps(data_buffer)
+
+                    gc.collect() # Free up RAM before processing the big list
 
                     try:
                         # Send the entire list directly to my Flask API:
@@ -204,20 +193,27 @@ try:
                             save_buffer_to_flash(data_buffer) # Clears the flash file too!
                             screen.move_to(19, 3)
                             screen.print(" ")
-
+                            print(f"Bulk Success")
                         response.close()
-
-                        # Only clear the buffer if the POST was successful
-                        data_buffer.clear()
-                        screen.move_to(19, 3)
-                        screen.print(" ")
                     except Exception as e:
                         print("POST Failed with error: ", e)
                         screen.move_to(19, 3)
                         screen.print("E")
                         # Note: If it fails, we DO NOT clear the buffer. It wil keep growing
                         # and try to send everything again on the next loop
-                
+                else:
+                    try:
+                        response = urequests.post(API_URL, json=live_data, headers=headers)
+    
+                        if response.status_code in [200, 201]:
+                            screen.move_to(19, 3)
+                            screen.print("^")
+                        response.close()
+                    except Exception as e:
+                        screen.move_to(19, 3)
+                        screen.print("-")
+                        print("Live Ping Failed:", e)
+                        pass
                 # Pause to keep sync with the sensor's ~1 second reporting rate
                 time.sleep_ms(800)
 # If literally anything crashes inside the loop:
