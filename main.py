@@ -4,6 +4,7 @@ import time
 import ntptime
 import urequests
 from lcd import LCD
+import ujson
 
 
 # Give the board 5 seconds to breathe on boot 
@@ -21,7 +22,7 @@ screen.move_to(0, 0)
 screen.print("Booting up...")
 
 # Set how many readings to store before sending the bulk POST
-BUFFER_LIMIT = 120
+BUFFER_LIMIT = 60
 
 # Setup Hardware UART for PMS7003 (Using GP5 for RX)
 uart = machine.UART(1, baudrate=9600, tx=machine.Pin(4), rx=machine.Pin(5))
@@ -162,10 +163,19 @@ try:
                     'live_data': live_data
                 }
 
-                print(payload)
+                
+
+                # print(payload)
                 try:
+                    live_json_payload = ujson.dumps(payload["live_data"])
+
                     headers = {"Content-Type": "application/json", "X-API-Key": API_KEY}
-                    response = urequests.post(API_URL, json=payload, headers=headers)
+
+                    response = urequests.post(API_URL, json=live_json_payload, headers=headers)
+
+                    print("Server Response Code: ", response.status_code)
+                    print("Server Response Body: ", response.text)
+
                     response.close()
                     screen.move_to(19, 3)
                     screen.print("^")
@@ -179,12 +189,16 @@ try:
                 if len(data_buffer) >= BUFFER_LIMIT:
                     screen.move_to(19, 3)
                     screen.print("*") # Show upload indicator
-
+                    json_payload = ujson.dumps(payload["data_buffer"])
                     headers = {"Content-Type": "application/json", "X-API-Key": API_KEY}
 
                     try:
                         # Send the entire list directly to my Flask API:
                         response = urequests.post(API_URL, json=payload, headers=headers)
+
+                        print("Server Response Code: ", response.status_code)
+                        print("Server Response Body: ", response.text)
+
                         response.close()
 
                         # Only clear the buffer if the POST was successful
@@ -192,6 +206,7 @@ try:
                         screen.move_to(19, 3)
                         screen.print(" ")
                     except Exception as e:
+                        print("POST Failed with error: ", e)
                         screen.move_to(19, 3)
                         screen.print("E")
                         # Note: If it fails, we DO NOT clear the buffer. It wil keep growing
