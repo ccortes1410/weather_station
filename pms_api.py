@@ -19,7 +19,7 @@ live_chart_buffer = []
 # Now you can safely pull your secrets using os.environ.get()
 API_SECRET_KEY = os.getenv("API_KEY", "fallback_default_key")
 TIDB_HOST = os.getenv("DB_HOST")
-TIDB_USER = os.getenv("DB_USER")
+TIDB_USER = os.getenv("DB_USERNAME")
 TIDB_PASSWORD = os.getenv("DB_PASSWORD")
 
 # --- UPDATE THESE WITH YOUR MYSQL CREDENTIALS ---
