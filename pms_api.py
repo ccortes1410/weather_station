@@ -83,8 +83,9 @@ def receive_data():
     if request.headers.get('X-API-Key') != API_SECRET_KEY:
         return jsonify({"error": "Unauthorized"}), 401
 
-    data = request.get_json(silent=True)
+    data = request.get_json(force=True, silent=True)
     if not data:
+        print("FAILED TO PARSE JSON. RAW BODY:", request.data)
         return jsonify({"error": "Invalid payload"}), 400
 
     # SCENARIO A: Pico sent a live ping (Dictionary)
