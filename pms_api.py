@@ -4,6 +4,7 @@ import mysql.connector
 import time
 from datetime import datetime
 from dotenv import load_dotenv
+import certifi
 
 load_dotenv()
 
@@ -29,7 +30,8 @@ db_config = {
     'database': 'pms_data',
     'port': 4000,
     'ssl_verify_cert': True,
-    'ssl_verify_identity': True
+    'ssl_verify_identity': True,
+    'ssl_ca': certifi.where()
 }
 
 latest_live_data = {

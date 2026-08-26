@@ -168,13 +168,11 @@ try:
                     'pm10': pm10
                 }
 
+                headers = {"X-API-Key": API_KEY}
                 # print(payload)
                 try:
                     live_payload = ujson.dumps(live_data)
-
-                    headers = {"Content-Type": "application/json", "X-API-Key": API_KEY}
-
-                    response = urequests.post(API_URL, json=live_payload, headers=headers)
+                    response = urequests.post(API_URL, json=live_data, headers=headers)
 
                     if response.status_code in [200, 201]:
                         screen.move_to(19, 3)
@@ -183,6 +181,7 @@ try:
                 except Exception as e:
                     screen.move_to(19, 3)
                     screen.print("-")
+                    print("Live Ping Failed:", e)
 
                 data_buffer.append(live_data)
                 save_buffer_to_flash(data_buffer)
@@ -195,11 +194,10 @@ try:
                     screen.move_to(19, 3)
                     screen.print("*") # Show upload indicator
                     json_payload = ujson.dumps(data_buffer)
-                    headers = {"Content-Type": "application/json", "X-API-Key": API_KEY}
 
                     try:
                         # Send the entire list directly to my Flask API:
-                        response = urequests.post(API_URL, json=json_payload, headers=headers)
+                        response = urequests.post(API_URL, json=data_buffer, headers=headers)
 
                         if response.status_code in [200, 201]:
                             data_buffer.clear()
