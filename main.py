@@ -13,8 +13,6 @@ import ujson
 print("Booting up weather station...")
 time.sleep(5) 
 
-
-
 # Initialize the LCD with our exact wiring pins
 screen = LCD(rs=10, en=11, d4=12, d5=13, d6=14, d7=15)
 screen.clear()
@@ -53,6 +51,8 @@ WIFI_SSID = secrets.get("WIFI_SSID", "default_network")
 WIFI_PASSWORD = secrets.get("WIFI_PASSWORD", "default_password")
 API_URL = "https://weather-station-wwau.onrender.com/api/sensor"
 API_KEY = secrets.get("API_KEY", "default_key")
+BUFFER_FILE = "buffer.json"
+
 
 def connect_wifi():
     screen.clear()
@@ -98,18 +98,38 @@ def sync_time():
     screen.print("Syncing Time...")
     try:
         ntptime.settime() # Fetches UTC time from the internet
-        if ntptime:
-            print("Time Synced!")
+        print("Time Synced!")
     except:
         screen.print("Time Sync Failed!")
         time.sleep(2)
 
+def save_buffer_to_flash(buffer_list):
+    try:
+        with open(BUFFER_FILE, "w") as f:
+            f.write(ujson.dumps(buffer_list))
+    except Exception as e:
+        print("Failed to save buffer to flash:", e)
+
+def load_buffer_from_flash():
+    try:
+        with open(BUFFER_FILE, "r") as f:
+            data = f.read()
+            if data:
+                return ujson.loads(data)
+    except OSError:
+        # File doesn't exist yet, which is totally normal on first booy
+        pass
+    except Exception as e:
+        print("Failed to load buffer from flash:", e)
+    return []
+    
 connect_wifi()
 sync_time()
 screen.clear()
 
 # This is the list that mimics my old Python PC script
-data_buffer = []
+data_buffer = load_buffer_from_flash()
+print(f"Restored {len(data_buffer)} pending readings from flash storage.")
 
 try:
     while True:
@@ -132,7 +152,6 @@ try:
                 screen.move_to(0, 3)
                 screen.print(f"PM10: {pm10}   ")
 
-                
                 # Calculate local time
                 # ntptime returns UTC. Subtracting 14,400 seconds offsets it to UTC-4 (Chile Standard Time)
                 t = time.localtime(time.time() - 14400)
@@ -140,7 +159,7 @@ try:
                 # Format exactly like my MySQL database expects: YYYY-MM-DD HH:MM:SS
                 time_str = f"{t[0]}-{t[1]:02d}-{t[2]:02d} {t[3]:02d}:{t[4]:02d}:{t[5]:02d}"
 
-                # print(f"[{time_str}] PM1.0: {pm1},  PM2.5: {pm25},  PM10: {pm10}")
+                print(f"[{time_str}] PM1.0: {pm1},  PM2.5: {pm25},  PM10: {pm10}")
                 
                 live_data = {
                     'timestamp': time_str,
@@ -149,55 +168,44 @@ try:
                     'pm10': pm10
                 }
 
-                # print(live_data)
-                # Append raw reading to the buffer list
-                data_buffer.append({
-                    "timestamp": time_str,
-                    "pm1": pm1,
-                    "pm25": pm25,
-                    "pm10": pm10
-                })
-
-                payload = {
-                    'data_buffer': data_buffer,
-                    'live_data': live_data
-                }
-
-                
-
                 # print(payload)
                 try:
-                    live_json_payload = ujson.dumps(payload["live_data"])
+                    live_payload = ujson.dumps(live_data)
 
                     headers = {"Content-Type": "application/json", "X-API-Key": API_KEY}
 
-                    response = urequests.post(API_URL, json=live_json_payload, headers=headers)
+                    response = urequests.post(API_URL, json=live_payload, headers=headers)
 
-                    print("Server Response Code: ", response.status_code)
-                    print("Server Response Body: ", response.text)
-
+                    if response.status_code in [200, 201]:
+                        screen.move_to(19, 3)
+                        screen.print("^")
                     response.close()
-                    screen.move_to(19, 3)
-                    screen.print("^")
-
                 except Exception as e:
                     screen.move_to(19, 3)
                     screen.print("-")
 
+                data_buffer.append(live_data)
+                save_buffer_to_flash(data_buffer)
+
+                screen.move_to(15, 3)
+                screen.print(f"{len(data_buffer):2d}")
 
                 # Check if buffer reached the limit to trigger the bulk POST
                 if len(data_buffer) >= BUFFER_LIMIT:
                     screen.move_to(19, 3)
                     screen.print("*") # Show upload indicator
-                    json_payload = ujson.dumps(payload["data_buffer"])
+                    json_payload = ujson.dumps(data_buffer)
                     headers = {"Content-Type": "application/json", "X-API-Key": API_KEY}
 
                     try:
                         # Send the entire list directly to my Flask API:
-                        response = urequests.post(API_URL, json=payload, headers=headers)
+                        response = urequests.post(API_URL, json=json_payload, headers=headers)
 
-                        print("Server Response Code: ", response.status_code)
-                        print("Server Response Body: ", response.text)
+                        if response.status_code in [200, 201]:
+                            data_buffer.clear()
+                            save_buffer_to_flash(data_buffer) # Clears the flash file too!
+                            screen.move_to(19, 3)
+                            screen.print(" ")
 
                         response.close()
 

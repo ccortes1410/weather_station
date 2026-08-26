@@ -26,75 +26,114 @@ db_config = {
     'host': '{TIDB_HOST}',
     'user': '{TIDB_USER}',        # Change this if you use a different user
     'password': '{TIDB_PASSWORD}',         # Enter your MySQL password here
-    'database': 'pms_data'
+    'database': 'pms_data',
+    'port': 4000,
+    'ssl_verify_cert': True,
+    'ssl_verify_identity': True
 }
+
+latest_live_data = {
+    'time_full': 'Waiting for Pico...',
+    'pm1': 0,
+    'pm25': 0,
+    'pm10': 0
+}
+live_chart_buffer = []
 
 def get_db_connection():
     return mysql.connector.connect(**db_config)
 
-def init_db():
-    # Connect without specifying the database so we can create it if it's missing
-    conn = mysql.connector.connect(
-        host=db_config['host'],
-        user=db_config['user'],
-        password=db_config['password'],
-        database="pms_data",
-    )
-    c = conn.cursor()
-    c.execute("CREATE DATABASE IF NOT EXISTS pms_data")
-    c.execute("USE pms_data")
+# def init_db():
+#     # Connect without specifying the database so we can create it if it's missing
+#     conn = mysql.connector.connect(
+#         host=db_config['host'],
+#         user=db_config['user'],
+#         password=db_config['password'],
+#         database="pms_data",
+#     )
+#     c = conn.cursor()
+#     c.execute("CREATE DATABASE IF NOT EXISTS pms_data")
+#     c.execute("USE pms_data")
 
-    current_day = datetime.now().strftime('%Y-%m-%d')
+#     current_day = datetime.now().strftime('%Y-%m-%d')
 
-    # Create the table
-    c.execute('''CREATE TABLE IF NOT EXISTS readings
-                 (id INT AUTO_INCREMENT PRIMARY KEY,
-                  timestamp DATETIME,
-                  pm1 INT,
-                  pm25 INT,
-                  pm10 INT)''')
-    conn.commit()
-    conn.close()
+#     # Create the table
+#     c.execute('''CREATE TABLE IF NOT EXISTS readings
+#                  (id INT AUTO_INCREMENT PRIMARY KEY,
+#                   timestamp DATETIME,
+#                   pm1 INT,
+#                   pm25 INT,
+#                   pm10 INT)''')
+#     conn.commit()
+#     conn.close()
 
 @app.route('/api/data', methods=['GET'])
 def get_dashboard_data():
-    global latest_live_data
-    try:
-        conn = get_db_connection()
-        c = conn.cursor(dictionary=True)
-        c.execute("""
-            SELECT timestamp, pm1, pm25, pm10 
-            FROM (
-                SELECT timestamp, pm1, pm25, pm10 
-                FROM readings 
-                ORDER BY timestamp DESC 
-                LIMIT 20
-            ) sub 
-            ORDER BY timestamp ASC
-        """)
-        rows = c.fetchall()
-        conn.close()
+    # Return only the fast RAM memory to save TiDB limits
+    return jsonify({
+        "live": latest_live_data,
+        "live_chart": live_chart_buffer
+    })
 
-        history = []
-        # Convert MySQL datetime objects to strings for JSON compatibility
-        for row in rows:
-            time_short = row['timestamp'].strftime('%H:%M:%S') if hasattr(row['timestamp'], 'strftime') else str(row['timestamps'])[11:19]
-            history.append({
-                'time_short': time_short,
-                'pm1': row['pm1'],
-                'pm25': row['pm25'],
-                'pm10': row['pm10']
-            })
+@app.route('/api/sensor', methods=['POST'])
+def receive_data():
+    global latest_live_data, live_chart_buffer
 
-        # Send back BOTH the 60-sec history and the 2-sec live data
-        return jsonify({
-            "history": history,
-            "live": latest_live_data,
-            "live_chart": live_chart_buffer
+    # Security Check
+    if request.headers.get('X-API-Key') != API_SECRET_KEY:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid payload"}), 400
+
+    # SCENARIO A: Pico sent a live ping (Dictionary)
+    if isinstance(data, dict):
+        latest_live_data = {
+            'time_full': data.get('timestamp', ''),
+            'pm1': data.get('pm1', 0),
+            'pm25': data.get('pm25', 0),
+            'pm10': data.get('pm10', 0)
+        }
+
+        # Add to the scrolling chart
+        time_short = data.get('timestamp', '').split(' ')[1] if ' ' in data.get('timestamp', '') else ''
+        live_chart_buffer.append({
+            'time_short': time_short,
+            'pm1': data.get('pm1', 0),
+            'pm25': data.get('pm25', 0),
+            'pm10': data.get('pm10', 0)
         })
-    except mysql.connector.Error as err:
-        return jsonify({"error": str(err)}), 500
-    
+
+        # Keep only the last 300 seconds (5 minutes) on the chart
+        if len(live_chart_buffer) > 300:
+            live_chart_buffer.pop(0)
+
+        return jsonify({"status": "live memory updated"}), 200
+
+    # SCENARIO B: Pico sent the bulk buffer (List)
+    elif isinstance(data, list):
+        try:
+            conn = get_db_connection()
+            c = conn.cursor()
+
+            # executemany automaticalle handles the list of dictionaries
+            sql = "INSERT INTO readings (timestamp, pm1, pm25, pm10) VALUES (%(timestamp)s, %(pm1)s, %(pm25)s, %(pm10)s)"
+            c.executemany(sql, data)
+
+            conn.commit()
+            c.close()
+            conn.close()
+
+            print(f"SUCCESS: Bulk saved {len(data)} readings to TiDB.")
+            return jsonify({"status": "bulk_success"}), 201
+        except mysql.connector.Error as err:
+            print(f"MySQL Error: {err}")
+            return jsonify({"error": "Database error"}), 400
+
+# --------------------------------------------
+#  HTML VIEWS
+# --------------------------------------------    
 @app.route('/', methods=['GET'])
 def home():
     html = """
@@ -195,76 +234,6 @@ def home():
     """
     return html
 
-@app.route('/api/sensor', methods=['POST'])
-def receive_data():
-    global latest_live_data, last_db_write
-    data = request.get_json()
-
-    if not data or data["live_data"]["pm1"] not in data or data["live_data"]["pm25"] not in data or data["live_data"]["pm10"] not in data:
-        return jsonify({"error": "Invalid payload"}), 400
-
-    current_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    # 1. Update live memory for the web dashboard (every second)
-    latest_live_data = {
-        'time_full': current_time_str,
-        'pm1': data["live_data"]["pm1"],
-        'pm25': data["live_data"]["pm25"],
-        'pm10': data["live_data"]["pm10"]
-    }
-
-    # 2. Add the current reading to our RAM buffer
-    # Notice we are using a Tuple ( ) inside the list for MySQL formatting
-    data_buffer = data["data_buffer"]
-
-    # data_buffer.append({
-    #     'timestamp': current_time_str, 
-    #     'pm1': int(data['pm1']),
-    #     'pm25': int(data['pm25']),
-    #     'pm10': int(data['pm10'])
-
-    # })
-    print(f"Elements in buffer: {len(data_buffer)}")
-
-    # Maintain a 60 second rolling window for the live chart
-    time_short = current_time_str.split(' ')[1] # Get the HH:MM:SS
-    live_chart_buffer.append({
-        'time_short': time_short,
-        'pm1': int(data["live_data"]["pm1"]),
-        'pm25': int(data["live_data"]["pm25"]),
-        'pm10': int(data["live_data"]["pm10"])
-    })
-
-    if len(live_chart_buffer) > 300 :
-        live_chart_buffer.pop(0)
-
-    # 3. Once the packet reaches 60 elements, send it to the database
-    if len(data_buffer) >= 60:
-        try:
-            conn = get_db_connection()
-            c = conn.cursor()
-
-            sql = "INSERT INTO readings (timestamp, pm1, pm25, pm10) VALUES (%(timestamp)s, %(pm1)s, %(pm25)s, %(pm10)s)"
-            
-            c.executemany(sql, data_buffer)
-            conn.commit()
-            conn.close()
-
-            print("\n=======================================================")
-            print(f"SUCCESS: Bulk saved {len(data_buffer)} readings to MySQL.")
-            print("=======================================================\n")
-
-            # Empty the packet to start collecting the next minute of data
-            data_buffer.clear()
-
-            # Tell the bridge the bulk was sent.
-            return jsonify({"status": "bulk_success"}), 201
-
-        except mysql.connector.Error as err:
-            print(f"MySQL Error: {err}")
-            return jsonify({"error": "Database error"}), 500
-    return jsonify({"status": "success"}), 201
-
 @app.route('/history', methods=['GET'])
 def view_history():
     try:
@@ -326,5 +295,4 @@ def view_history():
         return f"<h3>Database Error:</h3><p>{err}</p>"
 
 if __name__ == '__main__':
-    init_db()
     app.run(host='0.0.0.0', port=5000)
