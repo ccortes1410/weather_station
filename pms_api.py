@@ -24,11 +24,11 @@ TIDB_PASSWORD = os.getenv("DB_PASSWORD")
 
 # --- UPDATE THESE WITH YOUR MYSQL CREDENTIALS ---
 db_config = {
-    'host': '{TIDB_HOST}',
-    'user': '{TIDB_USER}',        # Change this if you use a different user
-    'password': '{TIDB_PASSWORD}',         # Enter your MySQL password here
+    'host': TIDB_HOST,
+    'user': TIDB_USER,        # Change this if you use a different user
+    'password': TIDB_PASSWORD,         # Enter your MySQL password here
     'database': 'pms_data',
-    'port': int(4000),
+    'port': 4000,
     'ssl_verify_cert': True,
     'ssl_verify_identity': True,
     'ssl_ca': certifi.where()
@@ -255,10 +255,10 @@ def view_history():
         for row in rows:
             html += f"""
                 <tr>
-                    <td>{row['timestamp']}</td>
-                    <td>{row['pm1']}</td>
-                    <td>{row['pm25']}</td>
-                    <td>{row['pm10']}</td>
+                    <td>{row["timestamp"]}</td>
+                    <td>{row["pm1"]}</td>
+                    <td>{row["pm25"]}</td>
+                    <td>{row["pm10"]}</td>
                 </tr>
             """
             
