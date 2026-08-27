@@ -1,9 +1,13 @@
 # Ignore passwords and sensitive data
 .env
 
+data/
+
 isrgrootx1.pem
 
 # Ignore Python virtual enviroments and cache
 venv/
 env/
 __pycache__/
+
+.vscode/

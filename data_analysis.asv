@@ -1,0 +1,17 @@
+clear; close all;
+
+addpath("data\")
+files = dir("data\");
+
+for i = 1:length(files)
+    % Process each file (e.g., load data, analyze, etc.)
+    filename = files(i).name;
+    % Add further processing steps here
+end
+
+data = readtable(filename,"ReadVariableNames",true,"FileType","text"); % Load the data from the current file
+% Perform analysis on the loaded data
+
+fig = "2026-08-26";
+figure(fig, dpi=120)
+plot(data., )

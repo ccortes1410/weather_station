@@ -58,39 +58,39 @@ def connect_wifi():
     screen.clear()
     screen.move_to(0, 0)
     screen.print("Connecting Wi-Fi...")
-    
+
+    network.country('CL')
     wlan = network.WLAN(network.STA_IF)
+
     wlan.active(False)  # Force a hard reset of the wireless chip
     time.sleep(1)
     wlan.active(True)
-    
+
+    wlan.config(pm=0xa11140)
+
+    print("Wifi:", WIFI_SSID)
     # Disconnect just in case it held an old connection state
     if wlan.isconnected():
         wlan.disconnect()
-        
+
+    
     wlan.connect(WIFI_SSID, WIFI_PASSWORD)
     
-    # Give it up to 15 seconds to connect
-    timeout = 30
-    start_time = time.time()
-    
-    while not wlan.isconnected():
-        if time.time() - start_time > timeout:
-            screen.clear()
-            screen.move_to(0, 0)
-            screen.print("Wi-Fi Failed!")
-            screen.move_to(0, 1)
-            screen.print("Check SSID/Pass")
-            print(">>> WIFI CONNECTION TIMEOUT <<<")
-            return False
+    # Give it a generous 15 seconds to finish the handshake
+    max_wait = 15
+    while max_wait > 0:
+        if wlan.status() < 0 or wlan.status() >= 3:
+            break
+        max_wait -= 1
+        print('Waiting for connection...')
         time.sleep(1)
-        print(".", end="")
-        
-    print("\nWi-Fi Connected! IP:", wlan.ifconfig()[0])
-    screen.clear()
-    screen.move_to(0, 0)
-    screen.print("Connected!")
-    time.sleep(1)
+
+    # 4. Check the final status
+    if wlan.status() != 3:
+        print("Connection Failed. Status code:", wlan.status())
+    else:
+        print("Connected successfully!")
+        print("IP:", wlan.ifconfig()[0])
     return True
 
 def sync_time():
@@ -138,6 +138,8 @@ try:
             buffer = uart.read(32)
             # Verify the 32-byte packet and the start bytes (0x42, 0x4D)
             if buffer and len(buffer) == 32 and buffer[0] == 0x42 and buffer[1] == 0x4D:
+                gc.collect() # Free up RAM before processing the big list
+
                 pm1 = (buffer[10] << 8) | buffer[11]
                 pm25 = (buffer[12] << 8) | buffer[13]
                 pm10 = (buffer[14] << 8) | buffer[15]
@@ -172,7 +174,7 @@ try:
                 save_buffer_to_flash(data_buffer)
 
                 screen.move_to(15, 3)
-                screen.print(f"{len(data_buffer):2d}")
+                screen.print(f"{len(data_buffer):2d}  ")
 
                 headers = {"X-API-Key": API_KEY}
                 # print(payload)
@@ -182,11 +184,9 @@ try:
                     screen.move_to(19, 3)
                     screen.print("*") # Show upload indicator
 
-                    gc.collect() # Free up RAM before processing the big list
-
                     try:
                         # Send the entire list directly to my Flask API:
-                        response = urequests.post(API_URL, json=data_buffer, headers=headers)
+                        response = urequests.post(API_URL, json=data_buffer, headers=headers, timeout=6.0)
 
                         if response.status_code in [200, 201]:
                             data_buffer.clear()
@@ -203,7 +203,7 @@ try:
                         # and try to send everything again on the next loop
                 else:
                     try:
-                        response = urequests.post(API_URL, json=live_data, headers=headers)
+                        response = urequests.post(API_URL, json=live_data, headers=headers, timeout=2.0)
     
                         if response.status_code in [200, 201]:
                             screen.move_to(19, 3)
