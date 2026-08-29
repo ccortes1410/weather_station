@@ -6,7 +6,7 @@ import csv
 import mysql.connector
 import certifi
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 load_dotenv()
 # Database configuration
@@ -28,6 +28,13 @@ db_config = {
 
 def get_db_connection():
     return mysql.connector.connect(**db_config)
+
+def file_exists(filename):
+    try:
+        os.stat(path=filename)
+        return True
+    except:
+        return False
 
 def fetch_data(cols: list[str], date):
 
@@ -60,18 +67,43 @@ def fetch_data(cols: list[str], date):
 
     return data
 
+today = datetime.today()
 
-pm_data_2026_08_26 = fetch_data(['pm1', 'pm25', 'pm10'], '2026-08-26')
+for i in range(0,7):
+    target_date = today - timedelta(days=i)
+    target_date = datetime.date(target_date).isoformat()
+    target_date_file = str.split(target_date, '-')[0] + '_' + str.split(target_date, '-')[1] + '_' + str.split(target_date, '-')[2]
 
-headers = ["date", "pm1", "pm25", "pm10"]
+    filepath = f"data/pm_data_{target_date_file}.csv"
 
-with open("data/pm_data_2026_08_26.csv", "a", newline="") as f:
-    writer = csv.writer(f)
-    try:
-        writer.writerow(headers)
-        for row in pm_data_2026_08_26:
-            writer.writerow(row)
-        f.close()
-    except Exception as e:
-        print(f"Error writing data to file: {e}")
-        f.close()
+    if file_exists(filepath):
+
+        pm_data = fetch_data(['pm1', 'pm25', 'pm10'], target_date)
+        
+        headers = ["date", "pm1", "pm25", "pm10"]
+
+        with open(filepath, "w", newline="") as f:
+            writer = csv.writer(f)
+            try:
+                writer.writerow(headers)
+                for row in pm_data:
+                    writer.writerow(row)
+                f.close()
+            except Exception as e:
+                print(f"Error writing data to file: {e}")
+                f.close()
+    else:
+        pm_data = fetch_data(['pm1', 'pm25', 'pm10'], target_date)
+                
+        headers = ["date", "pm1", "pm25", "pm10"]
+
+        with open(filepath, "a", newline="") as f:
+            writer = csv.writer(f)
+            try:
+                writer.writerow(headers)
+                for row in pm_data:
+                    writer.writerow(row)
+                f.close()
+            except Exception as e:
+                print(f"Error writing data to file: {e}")
+                f.close()
