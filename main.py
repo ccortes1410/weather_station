@@ -238,119 +238,136 @@ try:
         if uart.any():
             buffer = uart.read(32)
             # Verify the 32-byte packet and the start bytes (0x42, 0x4D)
-            if buffer and len(buffer) == 32 and buffer[0] == 0x42 and buffer[1] == 0x4D:
-                gc.collect() # Free up RAM before processing the big list
-                
-                pm1 = (buffer[10] << 8) | buffer[11]
-                pm25 = (buffer[12] << 8) | buffer[13]
-                pm10 = (buffer[14] << 8) | buffer[15]
+            if buffer and len(buffer) == 32:
+                if buffer[0] == 0x42 and buffer[1] == 0x4D:
 
-                # Update the screen with live data
-                screen.move_to(0, 0)
-                screen.print("Air Quality (ug/m3) ")
-                screen.move_to(0, 1)
-                screen.print(f"PM1.0: {pm1}   ")
-                screen.move_to(0, 2)
-                screen.print(f"PM2.5: {pm25}   ")
-                screen.move_to(0, 3)
-                screen.print(f"PM10: {pm10}   ")
+                    # Calculate the checksum
+                    # Add up all the values from byte 0 to byte 29
+                    calculated_checksum = sum(buffer[0:30])
+                    # Combine bytes 30 and 31 to get the sensor's official total
+                    sensor_checksum = (buffer[30] << 8) | buffer[31]
+
+                    # Compare them. Only proceed if the checksum matches
+                    if calculated_checksum == sensor_checksum:
+                        gc.collect() # Free up RAM before processing the big list
+                        
+                        pm1 = (buffer[10] << 8) | buffer[11]
+                        pm25 = (buffer[12] << 8) | buffer[13]
+                        pm10 = (buffer[14] << 8) | buffer[15]
+
+                        # Update the screen with live data
+                        screen.move_to(0, 0)
+                        screen.print("Air Quality (ug/m3) ")
+                        screen.move_to(0, 1)
+                        screen.print(f"PM1.0: {pm1}   ")
+                        screen.move_to(0, 2)
+                        screen.print(f"PM2.5: {pm25}   ")
+                        screen.move_to(0, 3)
+                        screen.print(f"PM10: {pm10}   ")
 
 
-                # time_str_short = f"{t[3]:02d}:{t[4]:02d}:{t[5]:02d}"
-                # screen.move_to(12, 1)
-                # screen.print(time_str_short)
+                        # time_str_short = f"{t[3]:02d}:{t[4]:02d}:{t[5]:02d}"
+                        # screen.move_to(12, 1)
+                        # screen.print(time_str_short)
 
-                # Calculate local time
-                # ntptime returns UTC. Subtracting 14,400 seconds offsets it to UTC-4 (Chile Standard Time)
-                t = time.localtime(time.time() - 14400)
+                        # Calculate local time
+                        # ntptime returns UTC. Subtracting 14,400 seconds offsets it to UTC-4 (Chile Standard Time)
+                        t = time.localtime(time.time() - 14400)
 
-                # Format exactly like my MySQL database expects: YYYY-MM-DD HH:MM:SS
-                time_str = f"{t[0]}-{t[1]:02d}-{t[2]:02d} {t[3]:02d}:{t[4]:02d}:{t[5]:02d}"
+                        # Format exactly like my MySQL database expects: YYYY-MM-DD HH:MM:SS
+                        time_str = f"{t[0]}-{t[1]:02d}-{t[2]:02d} {t[3]:02d}:{t[4]:02d}:{t[5]:02d}"
 
-                current_ms = time.ticks_ms()
-                # Check if 5000 ms have passed
-                if time.ticks_diff(time.ticks_ms(), last_blink) >= 5000:
-                    if pm25 <= 25:
-                        # Good air: quick green flash
-                        green_led.on()
-                    else:
-                        # Bad air: quick red flash
-                        red_led.on()
-                    heartbeat_timer.init(period=100, mode=Timer.ONE_SHOT, callback=turn_off_leds)
+                        current_ms = time.ticks_ms()
+                        # Check if 5000 ms have passed
+                        if time.ticks_diff(time.ticks_ms(), last_blink) >= 5000:
+                            if pm25 <= 25:
+                                # Good air: quick green flash
+                                green_led.on()
+                            else:
+                                # Bad air: quick red flash
+                                red_led.on()
+                            heartbeat_timer.init(period=100, mode=Timer.ONE_SHOT, callback=turn_off_leds)
 
-                    last_blink = current_ms
-                
-                live_data = {
-                    'timestamp': time_str,
-                    'pm1': pm1,
-                    'pm25': pm25,
-                    'pm10': pm10
-                }
+                            last_blink = current_ms
+                        
+                        live_data = {
+                            'timestamp': time_str,
+                            'pm1': pm1,
+                            'pm25': pm25,
+                            'pm10': pm10
+                        }
 
-                ping_counter += 1
+                        ping_counter += 1
 
-                data_buffer.append(live_data)
-                append_reading_to_flash(live_data)
+                        data_buffer.append(live_data)
+                        append_reading_to_flash(live_data)
 
-                screen.move_to(15, 3)
-                screen.print(f"{len(data_buffer):2d}  ")
-                screen.move_to(19, 3)
-                screen.print(" ")
-
-                headers = {"X-API-Key": API_KEY}
-                # print(payload)
-            
-                # Check if buffer reached the limit to trigger the bulk POST
-                if len(data_buffer) >= BUFFER_LIMIT:
-                    screen.move_to(19, 3)
-                    screen.print("*") # Show upload indicator
-
-                    upload_chunk = data_buffer[:BUFFER_LIMIT]
-
-                    payload = ujson.dumps(upload_chunk)
-
-                    gc.collect()
-
-                    try:
-                        # Send the entire list directly to my Flask API:
-                        response = urequests.post(API_URL, data=payload, headers=headers, timeout=10.0)
-
-                        if response.status_code in [200, 201]:
-                            data_buffer = data_buffer[BUFFER_LIMIT:]
-                            
-                            with open(BUFFER_FILE, "w") as f:
-                                for remaining_reading in data_buffer:
-                                    f.write(ujson.dumps(remaining_reading) + '\n')
-
-                            screen.move_to(19, 3)
-                            screen.print(" ")
-                            print(f"Bulk Success")
-
-                        response.close()
-                    except Exception as e:
-                        print("Upload Failed:", e)
+                        screen.move_to(15, 3)
+                        screen.print(f"{len(data_buffer):2d}  ")
                         screen.move_to(19, 3)
-                        screen.print("E")
-                        # Note: If it fails, we DO NOT clear the buffer. It wil keep growing
-                        # and try to send everything again on the next loop
-                else:
-                    if ping_counter >= 5:
-                        try:
-                            response = urequests.post(API_URL, json=live_data, headers=headers, timeout=3.0)
-        
-                            if response.status_code in [200, 201]:
-                                screen.move_to(19, 3)
-                                screen.print("^")
-                            response.close()
-                        except Exception as e:
+                        screen.print(" ")
+
+                        headers = {"X-API-Key": API_KEY}
+                        # print(payload)
+                    
+                        # Check if buffer reached the limit to trigger the bulk POST
+                        if len(data_buffer) >= BUFFER_LIMIT:
                             screen.move_to(19, 3)
-                            screen.print("-")
-                            print("Live Ping Failed:", e)
-                            pass
-                        ping_counter = 0
-                        gc.collect()
-                # Pause to keep sync with the sensor's ~1 second reporting rate
-                time.sleep_ms(800)
+                            screen.print("*") # Show upload indicator
+
+                            upload_chunk = data_buffer[:BUFFER_LIMIT]
+
+                            payload = ujson.dumps(upload_chunk)
+
+                            gc.collect()
+
+                            try:
+                                # Send the entire list directly to my Flask API:
+                                response = urequests.post(API_URL, data=payload, headers=headers, timeout=10.0)
+
+                                if response.status_code in [200, 201]:
+                                    data_buffer = data_buffer[BUFFER_LIMIT:]
+                                    
+                                    with open(BUFFER_FILE, "w") as f:
+                                        for remaining_reading in data_buffer:
+                                            f.write(ujson.dumps(remaining_reading) + '\n')
+
+                                    screen.move_to(19, 3)
+                                    screen.print(" ")
+                                    print(f"Bulk Success")
+
+                                response.close()
+                            except Exception as e:
+                                print("Upload Failed:", e)
+                                screen.move_to(19, 3)
+                                screen.print("E")
+                                # Note: If it fails, we DO NOT clear the buffer. It wil keep growing
+                                # and try to send everything again on the next loop
+                        else:
+                            if ping_counter >= 5:
+                                try:
+                                    response = urequests.post(API_URL, json=live_data, headers=headers, timeout=3.0)
+                
+                                    if response.status_code in [200, 201]:
+                                        screen.move_to(19, 3)
+                                        screen.print("^")
+                                    response.close()
+                                except Exception as e:
+                                    screen.move_to(19, 3)
+                                    screen.print("-")
+                                    print("Live Ping Failed:", e)
+                                    pass
+                                ping_counter = 0
+                                gc.collect()
+                        # Pause to keep sync with the sensor's ~1 second reporting rate
+                        time.sleep_ms(800)
+                    else:
+                        # The frame was misaligned or electrically corrupted
+                        print("Checksum mismatch. Discarding frame.")
+                        print("Calculated:", calculated_checksum, "Sensor:", sensor_checksum)
+                        uart.read()
+                else:
+                    print("Framing error detected! Resyncing UART...")
 # If literally anything crashes inside the loop:
 except Exception as e:
     # 1. Print the error (helpful when plugged into PC)

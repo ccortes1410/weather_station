@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Live Air Quality Monitor{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<!-- Hero Air Quality Index Banner -->
+<section class="card aqi-hero" id="aqi-banner" data-level="unknown">
+    <div class="aqi-hero-main">
+        <div class="aqi-score-block">
+            <span class="aqi-scale-tag" id="aqi-scale-label">Chile ICAP / SINCA</span>
+            <div class="aqi-score-row">
+                <span class="aqi-value" id="aqi-index-val">--</span>
+                <span class="aqi-badge" id="aqi-category-badge">Waiting</span>
+            </div>
+            <p class="aqi-driver" id="aqi-driver-text">Waiting for live sensor reading...</p>
+        </div>
+
+        <div class="aqi-advice-block">
+            <p class="aqi-advice" id="aqi-advice-text">Connect the Pico weather station to begin streaming real-time particulate matter readings.</p>
+            <div class="aqi-meta-row">
+                <span id="update-time" class="meta-chip">Last reading: --</span>
+                <span id="relative-time" class="meta-chip">--</span>
+                <span id="session-count" class="meta-chip">Session: 0 samples</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="aqi-controls">
+        <label for="scale-select" class="control-label">Index Scale</label>
+        <select id="scale-select" class="select-input">
+            <option value="sinca" selected>Chile ICAP / SINCA</option>
+            <option value="epa">US EPA AQI</option>
+            <option value="who">WHO 2021 Guidelines</option>
+        </select>
+    </div>
+</section>
+
+<!-- PM Metric Cards -->
+<section class="metrics-grid" aria-label="Particulate matter concentrations">
+    <article class="card metric-card metric-pm1">
+        <div class="metric-header">
+            <span class="metric-label">PM 1.0</span>
+            <span class="metric-tag">Ultrafine</span>
+        </div>
+        <div class="metric-value pm1-color">
+            <span id="pm1-val">--</span>
+            <span class="unit">&micro;g/m&sup3;</span>
+        </div>
+        <div class="session-stats" id="pm1-stats">
+            <div class="stat-item"><span class="stat-label">Min</span><span class="stat-val" id="pm1-min">--</span></div>
+            <div class="stat-item"><span class="stat-label">Avg</span><span class="stat-val" id="pm1-avg">--</span></div>
+            <div class="stat-item"><span class="stat-label">Max</span><span class="stat-val" id="pm1-max">--</span></div>
+        </div>
+    </article>
+
+    <article class="card metric-card metric-pm25">
+        <div class="metric-header">
+            <span class="metric-label">PM 2.5</span>
+            <span class="metric-tag">Fine (Primary)</span>
+        </div>
+        <div class="metric-value pm25-color">
+            <span id="pm25-val">--</span>
+            <span class="unit">&micro;g/m&sup3;</span>
+        </div>
+        <div class="session-stats" id="pm25-stats">
+            <div class="stat-item"><span class="stat-label">Min</span><span class="stat-val" id="pm25-min">--</span></div>
+            <div class="stat-item"><span class="stat-label">Avg</span><span class="stat-val" id="pm25-avg">--</span></div>
+            <div class="stat-item"><span class="stat-label">Max</span><span class="stat-val" id="pm25-max">--</span></div>
+        </div>
+    </article>
+
+    <article class="card metric-card metric-pm10">
+        <div class="metric-header">
+            <span class="metric-label">PM 10</span>
+            <span class="metric-tag">Coarse</span>
+        </div>
+        <div class="metric-value pm10-color">
+            <span id="pm10-val">--</span>
+            <span class="unit">&micro;g/m&sup3;</span>
+        </div>
+        <div class="session-stats" id="pm10-stats">
+            <div class="stat-item"><span class="stat-label">Min</span><span class="stat-val" id="pm10-min">--</span></div>
+            <div class="stat-item"><span class="stat-label">Avg</span><span class="stat-val" id="pm10-avg">--</span></div>
+            <div class="stat-item"><span class="stat-label">Max</span><span class="stat-val" id="pm10-max">--</span></div>
+        </div>
+    </article>
+</section>
+
+<!-- Live Chart Card -->
+<section class="card chart-card">
+    <div class="chart-header">
+        <div>
+            <h2 class="section-title">Live Particulate Matter Trend</h2>
+            <p class="section-subtitle">Rolling in-memory stream (last 300 pings, zero database queries)</p>
+        </div>
+        <div class="chart-controls">
+            <label class="toggle-chip" for="toggle-thresholds">
+                <input type="checkbox" id="toggle-thresholds" checked>
+                <span>Reference Lines</span>
+            </label>
+        </div>
+    </div>
+
+    <div class="chart-wrapper">
+        <canvas id="airQualityChart"></canvas>
+    </div>
+
+    <div class="threshold-legend" id="threshold-legend">
+        <span class="legend-item"><span class="legend-dash dash-who"></span>WHO 24h PM2.5 (15 &micro;g/m&sup3;)</span>
+        <span class="legend-item"><span class="legend-dash dash-pico"></span>Pico Red LED (25 &micro;g/m&sup3;)</span>
+        <span class="legend-item"><span class="legend-dash dash-sinca"></span>SINCA Regular PM2.5 (50 &micro;g/m&sup3;)</span>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/aqi.js') }}"></script>
+<script src="{{ url_for('static', filename='js/live.js') }}"></script>
+{% endblock %}

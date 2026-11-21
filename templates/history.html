@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Air Quality History{% endblock %}
+
+{% block content %}
+<section class="card">
+    <div class="chart-header">
+        <div>
+            <h1 class="section-title">Recent Air Quality Readings</h1>
+            <p class="section-subtitle">Last 100 saved readings from TiDB (newest first)</p>
+        </div>
+        <a href="{{ url_for('home') }}" class="btn-secondary">&larr; Back to Live</a>
+    </div>
+
+    {% if db_error %}
+    <div class="alert-box alert-error">
+        <strong>Database Error:</strong> {{ db_error }}
+    </div>
+    {% elif not rows %}
+    <div class="empty-state">
+        No historical readings found in the database yet.
+    </div>
+    {% else %}
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>PM 1.0 (&micro;g/m&sup3;)</th>
+                    <th>PM 2.5 (&micro;g/m&sup3;)</th>
+                    <th>PM 10 (&micro;g/m&sup3;)</th>
+                    <th>SINCA Level</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                {% set pm25 = row["pm25"] or 0 %}
+                {% set pm10 = row["pm10"] or 0 %}
+                {% if pm25 >= 170 or pm10 >= 330 %}
+                    {% set lvl_label = "Emergencia" %}
+                    {% set lvl_class = "level-emergency" %}
+                {% elif pm25 >= 110 or pm10 >= 240 %}
+                    {% set lvl_label = "Preemergencia" %}
+                    {% set lvl_class = "level-preemergency" %}
+                {% elif pm25 >= 80 or pm10 >= 195 %}
+                    {% set lvl_label = "Alerta" %}
+                    {% set lvl_class = "level-alert" %}
+                {% elif pm25 >= 50 or pm10 >= 150 %}
+                    {% set lvl_label = "Regular" %}
+                    {% set lvl_class = "level-regular" %}
+                {% else %}
+                    {% set lvl_label = "Bueno" %}
+                    {% set lvl_class = "level-good" %}
+                {% endif %}
+                <tr>
+                    <td class="mono">{{ row["timestamp"] }}</td>
+                    <td class="pm1-color bold">{{ row["pm1"] }}</td>
+                    <td class="pm25-color bold">{{ row["pm25"] }}</td>
+                    <td class="pm10-color bold">{{ row["pm10"] }}</td>
+                    <td><span class="table-badge {{ lvl_class }}">{{ lvl_label }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Lightweight one-shot sensor status check on History page (zero DB cost)
+    fetch('/api/data?t=' + Date.now())
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            var pill = document.getElementById('sensor-status-pill');
+            var text = document.getElementById('sensor-status-text');
+            if (!pill || !text || !data.meta) return;
+            var s = data.meta.status || 'offline';
+            pill.className = 'status-pill status-' + s;
+            text.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+        })
+        .catch(function () {});
+</script>
+{% endblock %}

@@ -69,7 +69,7 @@ def fetch_data(cols: list[str], date):
 
 today = datetime.today()
 
-for i in range(0,7):
+for i in range(0,5):
     target_date = today - timedelta(days=i)
     target_date = datetime.date(target_date).isoformat()
     target_date_file = str.split(target_date, '-')[0] + '_' + str.split(target_date, '-')[1] + '_' + str.split(target_date, '-')[2]
