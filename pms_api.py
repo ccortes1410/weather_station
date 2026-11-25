@@ -28,6 +28,7 @@ db_config: Dict[str, Any] = {
     'password': TIDB_PASSWORD,
     'database': 'pms_data',
     'port': 4000,
+    'connection_timeout': 20,
     'ssl_verify_cert': True,
     'ssl_verify_identity': False,
     'ssl_ca': certifi.where()
@@ -209,26 +210,22 @@ def build_history_filters(args: Any) -> Dict[str, Any]:
 
     where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
 
-    # Choose bucket expression based on span_hours (using %s param to avoid %% escaping issues)
+    # Choose TiKV-pushdown-friendly integer bucket mode (1 single DB scan powers summary, trend & hourly profile)
     if span_hours <= 2:
+        bucket_mode = '1m'
         bucket_label = '1 min'
-        bucket_expr = "DATE_FORMAT(timestamp, %s)"
-        bucket_fmt = "%Y-%m-%d %H:%i:00"
         ttl_sec = 60
     elif span_hours <= 48:
+        bucket_mode = '5m'
         bucket_label = '5 min'
-        bucket_expr = "CONCAT(DATE_FORMAT(timestamp, %s), LPAD((MINUTE(timestamp) DIV 5) * 5, 2, '0'), ':00')"
-        bucket_fmt = "%Y-%m-%d %H:"
         ttl_sec = 180
     elif span_hours <= 336:
+        bucket_mode = '1h'
         bucket_label = '1 hour'
-        bucket_expr = "DATE_FORMAT(timestamp, %s)"
-        bucket_fmt = "%Y-%m-%d %H:00:00"
         ttl_sec = 300
     else:
+        bucket_mode = '6h'
         bucket_label = '6 hours'
-        bucket_expr = "CONCAT(DATE_FORMAT(timestamp, %s), LPAD((HOUR(timestamp) DIV 6) * 6, 2, '0'), ':00:00')"
-        bucket_fmt = "%Y-%m-%d "
         ttl_sec = 600
 
     cache_key = (
@@ -251,16 +248,15 @@ def build_history_filters(args: Any) -> Dict[str, Any]:
         'sort_sql': sort_dir,
         'where_sql': where_sql,
         'params': params,
+        'bucket_mode': bucket_mode,
         'bucket_label': bucket_label,
-        'bucket_expr': bucket_expr,
-        'bucket_fmt': bucket_fmt,
         'ttl_sec': ttl_sec,
         'cache_key': cache_key
     }
 
 
 def fetch_history_bundle(flt: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
-    """Fetch filtered summary, bucketed series, hourly pattern, and raw table rows (TTL-cached)."""
+    """Fetch filtered summary, bucketed series, hourly pattern, and raw rows in 2 fast queries (TTL-cached)."""
     cached = query_cache.get(flt['cache_key'])
     if cached is not None:
         return cached, True
@@ -269,96 +265,188 @@ def fetch_history_bundle(flt: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
     cursor = None
     where_sql: str = flt['where_sql']
     params: List[Any] = flt['params']
+    bucket_mode: str = flt['bucket_mode']
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # 1. Summary statistics across the filtered window
+        # 1. Single TiKV-pushed-down integer GROUP BY scan (replaces 3 separate full-range scans!)
+        if bucket_mode == '1m':
+            mn_select = "MINUTE(timestamp) AS mn,"
+            group_cols = "yr, mo, dy, hr, mn"
+        elif bucket_mode == '5m':
+            mn_select = "(MINUTE(timestamp) DIV 5) * 5 AS mn,"
+            group_cols = "yr, mo, dy, hr, mn"
+        else:
+            mn_select = "0 AS mn,"
+            group_cols = "yr, mo, dy, hr"
+
         cursor.execute(
-            f"SELECT COUNT(*) AS total_count, "
-            f"ROUND(AVG(pm1), 1) AS avg_pm1, MIN(pm1) AS min_pm1, MAX(pm1) AS max_pm1, "
-            f"ROUND(AVG(pm25), 1) AS avg_pm25, MIN(pm25) AS min_pm25, MAX(pm25) AS max_pm25, "
-            f"ROUND(AVG(pm10), 1) AS avg_pm10, MIN(pm10) AS min_pm10, MAX(pm10) AS max_pm10, "
+            f"SELECT "
+            f"YEAR(timestamp) AS yr, MONTH(timestamp) AS mo, DAY(timestamp) AS dy, HOUR(timestamp) AS hr, "
+            f"{mn_select} "
+            f"COUNT(*) AS cnt, "
+            f"SUM(pm1) AS sum_pm1, MIN(pm1) AS min_pm1, MAX(pm1) AS max_pm1, "
+            f"SUM(pm25) AS sum_pm25, MIN(pm25) AS min_pm25, MAX(pm25) AS max_pm25, "
+            f"SUM(pm10) AS sum_pm10, MIN(pm10) AS min_pm10, MAX(pm10) AS max_pm10, "
             f"MIN(timestamp) AS first_ts, MAX(timestamp) AS last_ts "
-            f"FROM readings {where_sql}",
+            f"FROM readings {where_sql} "
+            f"GROUP BY {group_cols} ORDER BY {group_cols}",
             params if params else None
         )
-        summary_row = cursor.fetchone() or {}
-        summary = {
-            'total_count': int(summary_row.get('total_count') or 0),
-            'avg_pm1': float(summary_row['avg_pm1']) if summary_row.get('avg_pm1') is not None else None,
-            'min_pm1': int(summary_row['min_pm1']) if summary_row.get('min_pm1') is not None else None,
-            'max_pm1': int(summary_row['max_pm1']) if summary_row.get('max_pm1') is not None else None,
-            'avg_pm25': float(summary_row['avg_pm25']) if summary_row.get('avg_pm25') is not None else None,
-            'min_pm25': int(summary_row['min_pm25']) if summary_row.get('min_pm25') is not None else None,
-            'max_pm25': int(summary_row['max_pm25']) if summary_row.get('max_pm25') is not None else None,
-            'avg_pm10': float(summary_row['avg_pm10']) if summary_row.get('avg_pm10') is not None else None,
-            'min_pm10': int(summary_row['min_pm10']) if summary_row.get('min_pm10') is not None else None,
-            'max_pm10': int(summary_row['max_pm10']) if summary_row.get('max_pm10') is not None else None,
-            'first_ts': str(summary_row['first_ts']) if summary_row.get('first_ts') is not None else None,
-            'last_ts': str(summary_row['last_ts']) if summary_row.get('last_ts') is not None else None
+        agg_rows = cursor.fetchall() or []
+
+        total_count = 0
+        tot_sum_pm1 = 0.0
+        tot_sum_pm25 = 0.0
+        tot_sum_pm10 = 0.0
+        g_min_pm1: Optional[int] = None
+        g_max_pm1: Optional[int] = None
+        g_min_pm25: Optional[int] = None
+        g_max_pm25: Optional[int] = None
+        g_min_pm10: Optional[int] = None
+        g_max_pm10: Optional[int] = None
+        first_ts: Optional[str] = None
+        last_ts: Optional[str] = None
+
+        hr_acc: Dict[int, List[float]] = {}
+        rollup_map: Dict[str, Dict[str, Any]] = {}
+        rollup_order: List[str] = []
+
+        # If 'all' spans > 90 days (>2160 hourly buckets), group chart points by day so UI stays snappy
+        use_daily_rollup = bucket_mode == '6h' and len(agg_rows) > 2160
+        actual_bucket_label = '1 day' if use_daily_rollup else str(flt['bucket_label'])
+
+        for r in agg_rows:
+            cnt = int(r.get('cnt') or 0)
+            if cnt <= 0:
+                continue
+
+            yr = int(r.get('yr') or 0)
+            mo = int(r.get('mo') or 0)
+            dy = int(r.get('dy') or 0)
+            hr = int(r.get('hr') or 0)
+            mn = int(r.get('mn') or 0)
+
+            s1 = float(r.get('sum_pm1') or 0.0)
+            s25 = float(r.get('sum_pm25') or 0.0)
+            s10 = float(r.get('sum_pm10') or 0.0)
+
+            mn1 = int(r['min_pm1']) if r.get('min_pm1') is not None else 0
+            mx1 = int(r['max_pm1']) if r.get('max_pm1') is not None else 0
+            mn25 = int(r['min_pm25']) if r.get('min_pm25') is not None else 0
+            mx25 = int(r['max_pm25']) if r.get('max_pm25') is not None else 0
+            mn10 = int(r['min_pm10']) if r.get('min_pm10') is not None else 0
+            mx10 = int(r['max_pm10']) if r.get('max_pm10') is not None else 0
+
+            r_first = str(r['first_ts']) if r.get('first_ts') is not None else None
+            r_last = str(r['last_ts']) if r.get('last_ts') is not None else None
+
+            total_count += cnt
+            tot_sum_pm1 += s1
+            tot_sum_pm25 += s25
+            tot_sum_pm10 += s10
+
+            if g_min_pm1 is None or mn1 < g_min_pm1:
+                g_min_pm1 = mn1
+            if g_max_pm1 is None or mx1 > g_max_pm1:
+                g_max_pm1 = mx1
+            if g_min_pm25 is None or mn25 < g_min_pm25:
+                g_min_pm25 = mn25
+            if g_max_pm25 is None or mx25 > g_max_pm25:
+                g_max_pm25 = mx25
+            if g_min_pm10 is None or mn10 < g_min_pm10:
+                g_min_pm10 = mn10
+            if g_max_pm10 is None or mx10 > g_max_pm10:
+                g_max_pm10 = mx10
+
+            if r_first is not None and (first_ts is None or r_first < first_ts):
+                first_ts = r_first
+            if r_last is not None and (last_ts is None or r_last > last_ts):
+                last_ts = r_last
+
+            # Accumulate hourly time-of-day profile (0..23)
+            if hr not in hr_acc:
+                hr_acc[hr] = [0.0, 0.0, 0.0]
+            hr_acc[hr][0] += s25
+            hr_acc[hr][1] += s10
+            hr_acc[hr][2] += float(cnt)
+
+            # Accumulate trend chart bucket
+            if use_daily_rollup:
+                b_key = f"{yr:04d}-{mo:02d}-{dy:02d} 00:00:00"
+            elif bucket_mode == '6h':
+                b_hr = (hr // 6) * 6
+                b_key = f"{yr:04d}-{mo:02d}-{dy:02d} {b_hr:02d}:00:00"
+            else:
+                b_key = f"{yr:04d}-{mo:02d}-{dy:02d} {hr:02d}:{mn:02d}:00"
+
+            if b_key not in rollup_map:
+                rollup_order.append(b_key)
+                rollup_map[b_key] = {
+                    'cnt': cnt,
+                    's1': s1,
+                    's25': s25,
+                    's10': s10,
+                    'min25': mn25,
+                    'max25': mx25
+                }
+            else:
+                acc = rollup_map[b_key]
+                acc['cnt'] += cnt
+                acc['s1'] += s1
+                acc['s25'] += s25
+                acc['s10'] += s10
+                if mn25 < acc['min25']:
+                    acc['min25'] = mn25
+                if mx25 > acc['max25']:
+                    acc['max25'] = mx25
+
+        summary: Dict[str, Any] = {
+            'total_count': total_count,
+            'avg_pm1': round(tot_sum_pm1 / total_count, 1) if total_count > 0 else None,
+            'min_pm1': g_min_pm1,
+            'max_pm1': g_max_pm1,
+            'avg_pm25': round(tot_sum_pm25 / total_count, 1) if total_count > 0 else None,
+            'min_pm25': g_min_pm25,
+            'max_pm25': g_max_pm25,
+            'avg_pm10': round(tot_sum_pm10 / total_count, 1) if total_count > 0 else None,
+            'min_pm10': g_min_pm10,
+            'max_pm10': g_max_pm10,
+            'first_ts': first_ts,
+            'last_ts': last_ts
         }
 
-        # 2. Time-bucketed trend series (capped to 1000 buckets for UI smoothness)
-        bucket_expr = flt['bucket_expr']
-        bucket_params = [flt['bucket_fmt']] + params
-        cursor.execute(
-            f"SELECT {bucket_expr} AS bucket, "
-            f"ROUND(AVG(pm1), 1) AS pm1, "
-            f"ROUND(AVG(pm25), 1) AS pm25, "
-            f"ROUND(AVG(pm10), 1) AS pm10, "
-            f"MIN(pm25) AS min_pm25, "
-            f"MAX(pm25) AS max_pm25, "
-            f"COUNT(*) AS samples "
-            f"FROM readings {where_sql} "
-            f"GROUP BY bucket ORDER BY bucket ASC LIMIT 1000",
-            bucket_params
-        )
-        raw_series = cursor.fetchall() or []
         series: List[Dict[str, Any]] = []
-        for r in raw_series:
+        for b_key in rollup_order:
+            acc = rollup_map[b_key]
+            c = acc['cnt']
             series.append({
-                'bucket': str(r.get('bucket') or ''),
-                'pm1': float(r['pm1']) if r.get('pm1') is not None else 0.0,
-                'pm25': float(r['pm25']) if r.get('pm25') is not None else 0.0,
-                'pm10': float(r['pm10']) if r.get('pm10') is not None else 0.0,
-                'min_pm25': int(r['min_pm25']) if r.get('min_pm25') is not None else 0,
-                'max_pm25': int(r['max_pm25']) if r.get('max_pm25') is not None else 0,
-                'samples': int(r.get('samples') or 0)
+                'bucket': b_key,
+                'pm1': round(acc['s1'] / c, 1),
+                'pm25': round(acc['s25'] / c, 1),
+                'pm10': round(acc['s10'] / c, 1),
+                'min_pm25': acc['min25'],
+                'max_pm25': acc['max25'],
+                'samples': c
             })
-
-        # 3. Hourly time-of-day profile (0..23)
-        cursor.execute(
-            f"SELECT HOUR(timestamp) AS hr, "
-            f"ROUND(AVG(pm25), 1) AS avg_pm25, "
-            f"ROUND(AVG(pm10), 1) AS avg_pm10, "
-            f"COUNT(*) AS samples "
-            f"FROM readings {where_sql} "
-            f"GROUP BY hr ORDER BY hr ASC",
-            params if params else None
-        )
-        hourly_rows = cursor.fetchall() or []
-        by_hour: Dict[int, Dict[str, Any]] = {}
-        for hr_row in hourly_rows:
-            if hr_row.get('hr') is not None:
-                h = int(hr_row['hr'])
-                by_hour[h] = {
-                    'hour': h,
-                    'label': f"{h:02d}:00",
-                    'pm25': float(hr_row['avg_pm25']) if hr_row.get('avg_pm25') is not None else 0.0,
-                    'pm10': float(hr_row['avg_pm10']) if hr_row.get('avg_pm10') is not None else 0.0,
-                    'samples': int(hr_row.get('samples') or 0)
-                }
 
         hourly_profile: List[Dict[str, Any]] = []
         for h in range(24):
-            if h in by_hour:
-                hourly_profile.append(by_hour[h])
+            if h in hr_acc and hr_acc[h][2] > 0:
+                hc = hr_acc[h][2]
+                hourly_profile.append({
+                    'hour': h,
+                    'label': f"{h:02d}:00",
+                    'pm25': round(hr_acc[h][0] / hc, 1),
+                    'pm10': round(hr_acc[h][1] / hc, 1),
+                    'samples': int(hc)
+                })
             else:
                 hourly_profile.append({'hour': h, 'label': f"{h:02d}:00", 'pm25': None, 'pm10': None, 'samples': 0})
 
-        # 4. Raw table rows matching the filter
+        # 2. Index-backed raw table rows matching the filter
         sort_sql = flt['sort_sql']
         limit_val = int(flt['limit'])
         cursor.execute(
@@ -388,7 +476,7 @@ def fetch_history_bundle(flt: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
                 'max_pm25': flt['max_pm25'],
                 'limit': flt['limit'],
                 'sort': flt['sort'],
-                'bucket_label': flt['bucket_label']
+                'bucket_label': actual_bucket_label
             },
             'summary': summary,
             'series': series,
@@ -540,7 +628,7 @@ def get_rolling_stats():
         resp = jsonify(payload)
         resp.headers['X-Cache'] = 'MISS'
         return resp
-    except mysql.connector.Error as err:
+    except Exception as err:
         return jsonify({'error': str(err), 'samples': 0}), 500
     finally:
         if cursor is not None:
@@ -557,7 +645,7 @@ def api_history():
         resp = jsonify(bundle)
         resp.headers['X-Cache'] = 'HIT' if hit else 'MISS'
         return resp
-    except mysql.connector.Error as err:
+    except Exception as err:
         return jsonify({'error': str(err)}), 500
 
 
@@ -718,7 +806,7 @@ def view_history():
             args_dict['range'] = 'all'
             flt = build_history_filters(args_dict)
             bundle, _ = fetch_history_bundle(flt)
-    except mysql.connector.Error as err:
+    except Exception as err:
         db_error = str(err)
 
     rows = bundle['rows'] if bundle else []

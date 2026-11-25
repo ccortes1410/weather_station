@@ -368,7 +368,18 @@
         if (applyBtn) applyBtn.textContent = 'Loading...';
 
         fetch('/api/history?' + params.toString())
-            .then(function (r) { return r.json(); })
+            .then(function (r) {
+                return r.text().then(function (txt) {
+                    if (!txt || !txt.trim()) {
+                        throw new Error('Server returned an empty response (HTTP ' + r.status + ' — request likely timed out). Please click Apply to retry.');
+                    }
+                    try {
+                        return JSON.parse(txt);
+                    } catch (parseErr) {
+                        throw new Error('Server returned an unexpected response (HTTP ' + r.status + '). Please retry in a few seconds.');
+                    }
+                });
+            })
             .then(function (data) {
                 if (data.error) {
                     if (errorBox) {
