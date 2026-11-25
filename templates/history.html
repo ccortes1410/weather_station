@@ -1,27 +1,185 @@
 {% extends "base.html" %}
 
-{% block title %}Air Quality History{% endblock %}
+{% block title %}Air Quality History & Analytics{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+{% endblock %}
 
 {% block content %}
+<!-- Interactive Filter Bar -->
+<section class="card filter-card">
+    <div class="chart-header">
+        <div>
+            <h1 class="section-title">Historical Air Quality Explorer</h1>
+            <p class="section-subtitle">Filter, analyze, and export readings stored in TiDB (no Pico re-flash required)</p>
+        </div>
+        <div class="header-btn-group">
+            <a id="export-csv-btn" href="/api/export?range=7d" class="btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span>Export CSV</span>
+            </a>
+        </div>
+    </div>
+
+    <form id="history-filter-form" class="filter-form">
+        <!-- Quick Range Pills -->
+        <div class="filter-group filter-presets-group">
+            <span class="control-label">Time Window</span>
+            <div class="preset-pills" role="group" aria-label="Preset time ranges">
+                <button type="button" class="preset-btn" data-range="1h">1H</button>
+                <button type="button" class="preset-btn" data-range="24h">24H</button>
+                <button type="button" class="preset-btn active" data-range="7d">7D</button>
+                <button type="button" class="preset-btn" data-range="30d">30D</button>
+                <button type="button" class="preset-btn" data-range="all">All</button>
+            </div>
+        </div>
+
+        <!-- Custom Date Inputs -->
+        <div class="filter-group">
+            <label for="filter-start" class="control-label">Start Date</label>
+            <input type="date" id="filter-start" name="start" class="select-input">
+        </div>
+
+        <div class="filter-group">
+            <label for="filter-end" class="control-label">End Date</label>
+            <input type="date" id="filter-end" name="end" class="select-input">
+        </div>
+
+        <!-- SINCA Episode Filter -->
+        <div class="filter-group">
+            <label for="filter-level" class="control-label">SINCA Level</label>
+            <select id="filter-level" name="level" class="select-input">
+                <option value="all">All Levels</option>
+                <option value="good_only">Bueno Only (&lt;50)</option>
+                <option value="regular_plus">Regular+ (&ge;50)</option>
+                <option value="alert_plus">Alerta+ (&ge;80)</option>
+                <option value="preemergency_plus">Preemergencia+ (&ge;110)</option>
+                <option value="emergency_plus">Emergencia (&ge;170)</option>
+            </select>
+        </div>
+
+        <!-- Min / Max PM2.5 -->
+        <div class="filter-group filter-group-sm">
+            <label for="filter-min-pm25" class="control-label">Min PM2.5</label>
+            <input type="number" id="filter-min-pm25" name="min_pm25" min="0" max="5000" placeholder="0" class="select-input">
+        </div>
+
+        <div class="filter-group filter-group-sm">
+            <label for="filter-max-pm25" class="control-label">Max PM2.5</label>
+            <input type="number" id="filter-max-pm25" name="max_pm25" min="0" max="5000" placeholder="Any" class="select-input">
+        </div>
+
+        <!-- Table Limit & Sort -->
+        <div class="filter-group filter-group-sm">
+            <label for="filter-limit" class="control-label">Table Rows</label>
+            <select id="filter-limit" name="limit" class="select-input">
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="250">250</option>
+                <option value="500">500</option>
+            </select>
+        </div>
+
+        <div class="filter-group filter-group-sm">
+            <label for="filter-sort" class="control-label">Order</label>
+            <select id="filter-sort" name="sort" class="select-input">
+                <option value="desc" selected>Newest First</option>
+                <option value="asc">Oldest First</option>
+            </select>
+        </div>
+
+        <div class="filter-actions">
+            <button type="submit" class="btn-primary" id="apply-filters-btn">Apply</button>
+            <button type="button" class="btn-secondary" id="reset-filters-btn">Reset</button>
+        </div>
+    </form>
+</section>
+
+{% if db_error %}
+<div class="alert-box alert-error" id="history-error-box">
+    <strong>Database Error:</strong> {{ db_error }}
+</div>
+{% else %}
+<div class="alert-box alert-error hidden" id="history-error-box"></div>
+{% endif %}
+
+<!-- Filtered Summary Cards -->
+<section class="summary-strip">
+    <div class="card summary-mini">
+        <span class="stat-label">Matching Readings</span>
+        <span class="summary-big" id="sum-count">--</span>
+        <span class="rolling-sub" id="sum-span">--</span>
+    </div>
+    <div class="card summary-mini">
+        <span class="stat-label">Period Avg PM 2.5</span>
+        <div class="summary-badge-row">
+            <span class="summary-big pm25-color" id="sum-avg-pm25">--</span>
+            <span class="table-badge level-unknown" id="sum-sinca-badge">--</span>
+        </div>
+        <span class="rolling-sub" id="sum-minmax-pm25">Min -- &middot; Max -- &micro;g/m&sup3;</span>
+    </div>
+    <div class="card summary-mini">
+        <span class="stat-label">Period Avg PM 10</span>
+        <span class="summary-big pm10-color" id="sum-avg-pm10">--</span>
+        <span class="rolling-sub" id="sum-minmax-pm10">Min -- &middot; Max -- &micro;g/m&sup3;</span>
+    </div>
+    <div class="card summary-mini">
+        <span class="stat-label">Period Avg PM 1.0</span>
+        <span class="summary-big pm1-color" id="sum-avg-pm1">--</span>
+        <span class="rolling-sub" id="sum-minmax-pm1">Min -- &middot; Max -- &micro;g/m&sup3;</span>
+    </div>
+</section>
+
+<!-- Historical Trend & Time-of-Day Charts -->
+<section class="history-charts-grid">
+    <div class="card chart-card">
+        <div class="chart-header">
+            <div>
+                <h2 class="section-title">Historical Trend</h2>
+                <p class="section-subtitle" id="history-bucket-info">Aggregated time buckets</p>
+            </div>
+            <label class="toggle-chip" for="toggle-minmax-band">
+                <input type="checkbox" id="toggle-minmax-band" checked>
+                <span>PM2.5 Min–Max Band</span>
+            </label>
+        </div>
+        <div class="chart-wrapper">
+            <canvas id="historyTrendChart"></canvas>
+        </div>
+    </div>
+
+    <div class="card chart-card">
+        <div class="chart-header">
+            <div>
+                <h2 class="section-title">Time-of-Day Profile</h2>
+                <p class="section-subtitle">Average concentration by hour of day (00:00–23:00)</p>
+            </div>
+        </div>
+        <div class="chart-wrapper">
+            <canvas id="hourlyPatternChart"></canvas>
+        </div>
+    </div>
+</section>
+
+<!-- Filtered Raw Readings Table -->
 <section class="card">
     <div class="chart-header">
         <div>
-            <h1 class="section-title">Recent Air Quality Readings</h1>
-            <p class="section-subtitle">Last 100 saved readings from TiDB (newest first)</p>
+            <h2 class="section-title">Filtered Readings Table</h2>
+            <p class="section-subtitle" id="table-subtitle">Showing recent readings matching active filters</p>
         </div>
-        <a href="{{ url_for('home') }}" class="btn-secondary">&larr; Back to Live</a>
     </div>
 
-    {% if db_error %}
-    <div class="alert-box alert-error">
-        <strong>Database Error:</strong> {{ db_error }}
+    <div id="history-empty-state" class="empty-state {% if rows %}hidden{% endif %}">
+        No readings match the selected filters. Try widening the date range (e.g. click <strong>All</strong>) or resetting thresholds.
     </div>
-    {% elif not rows %}
-    <div class="empty-state">
-        No historical readings found in the database yet.
-    </div>
-    {% else %}
-    <div class="table-wrapper">
+
+    <div id="history-table-container" class="table-wrapper {% if not rows %}hidden{% endif %}">
         <table class="data-table">
             <thead>
                 <tr>
@@ -32,7 +190,7 @@
                     <th>SINCA Level</th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody id="history-table-body">
                 {% for row in rows %}
                 {% set pm25 = row["pm25"] or 0 %}
                 {% set pm10 = row["pm10"] or 0 %}
@@ -63,23 +221,13 @@
             </tbody>
         </table>
     </div>
-    {% endif %}
 </section>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    // Lightweight one-shot sensor status check on History page (zero DB cost)
-    fetch('/api/data?t=' + Date.now())
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-            var pill = document.getElementById('sensor-status-pill');
-            var text = document.getElementById('sensor-status-text');
-            if (!pill || !text || !data.meta) return;
-            var s = data.meta.status || 'offline';
-            pill.className = 'status-pill status-' + s;
-            text.textContent = s.charAt(0).toUpperCase() + s.slice(1);
-        })
-        .catch(function () {});
+    window.__INITIAL_HISTORY__ = {{ initial_bundle | tojson }};
 </script>
+<script src="{{ url_for('static', filename='js/aqi.js') }}"></script>
+<script src="{{ url_for('static', filename='js/history.js') }}"></script>
 {% endblock %}

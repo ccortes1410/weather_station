@@ -1,11 +1,14 @@
 (function () {
     const POLL_INTERVAL_MS = 5000;
+    const STATS_POLL_INTERVAL_MS = 300000; // 5 minutes (matches server TTL cache)
     const SCALE_STORAGE_KEY = 'aq_scale';
     const THRESHOLD_STORAGE_KEY = 'aq_show_thresholds';
 
     let pollTimer = null;
+    let statsTimer = null;
     let relativeTimer = null;
     let lastServerData = null;
+    let lastRollingStats = null;
     let lastReceivedClientMs = null;
     let showThresholds = true;
     let currentScale = 'sinca';
@@ -313,6 +316,54 @@
         }
     }
 
+    function renderRolling24h(stats) {
+        lastRollingStats = stats;
+        const badge = document.getElementById('rolling-badge');
+        const subtitle = document.getElementById('rolling-subtitle');
+        const p1 = document.getElementById('r24-pm1');
+        const p25 = document.getElementById('r24-pm25');
+        const p25Range = document.getElementById('r24-pm25-range');
+        const p10 = document.getElementById('r24-pm10');
+        const p10Range = document.getElementById('r24-pm10-range');
+        const peak = document.getElementById('r24-peak');
+        const samples = document.getElementById('r24-samples');
+        if (!badge || !p25) return;
+
+        if (!stats || !stats.samples) {
+            badge.className = 'table-badge level-unknown';
+            badge.textContent = 'No 24h Data';
+            if (subtitle) subtitle.textContent = 'No readings recorded in TiDB in the last 24 hours';
+            p1.innerHTML = '-- <small>&micro;g/m&sup3;</small>';
+            p25.innerHTML = '-- <small>&micro;g/m&sup3;</small>';
+            p25Range.textContent = 'Min -- · Max --';
+            p10.innerHTML = '-- <small>&micro;g/m&sup3;</small>';
+            p10Range.textContent = 'Min -- · Max --';
+            peak.textContent = '--';
+            samples.textContent = '0 readings';
+            return;
+        }
+
+        const evalRes = window.AirQualityIndex.evaluate(currentScale, stats.avg_pm25 || 0, stats.avg_pm10 || 0);
+        badge.className = 'table-badge level-' + evalRes.level;
+        badge.textContent = evalRes.displayValue + ' · ' + evalRes.category;
+        if (subtitle) subtitle.textContent = 'Official 24h rolling window since ' + (stats.since || '') + ' (cached 5m)';
+
+        p1.innerHTML = (stats.avg_pm1 !== null ? stats.avg_pm1 : '--') + ' <small>&micro;g/m&sup3;</small>';
+        p25.innerHTML = (stats.avg_pm25 !== null ? stats.avg_pm25 : '--') + ' <small>&micro;g/m&sup3;</small>';
+        p25Range.textContent = 'Min ' + (stats.min_pm25 ?? '--') + ' · Max ' + (stats.max_pm25 ?? '--') + ' µg/m³';
+        p10.innerHTML = (stats.avg_pm10 !== null ? stats.avg_pm10 : '--') + ' <small>&micro;g/m&sup3;</small>';
+        p10Range.textContent = 'Min ' + (stats.min_pm10 ?? '--') + ' · Max ' + (stats.max_pm10 ?? '--') + ' µg/m³';
+        peak.textContent = stats.peak_hour ? stats.peak_hour + ' (' + stats.peak_hour_pm25 + ' µg/m³)' : '--';
+        samples.textContent = stats.samples.toLocaleString() + ' readings';
+    }
+
+    function fetchRollingStats() {
+        fetch('/api/stats?t=' + Date.now())
+            .then(function (r) { return r.json(); })
+            .then(renderRolling24h)
+            .catch(function () {});
+    }
+
     function fetchData() {
         fetch('/api/data?t=' + Date.now())
             .then(function (response) { return response.json(); })
@@ -325,7 +376,9 @@
     function startPolling() {
         stopPolling();
         fetchData();
+        fetchRollingStats();
         pollTimer = setInterval(fetchData, POLL_INTERVAL_MS);
+        statsTimer = setInterval(fetchRollingStats, STATS_POLL_INTERVAL_MS);
         const info = document.getElementById('footer-poll-info');
         if (info) info.textContent = 'Live updates every 5s';
     }
@@ -334,6 +387,10 @@
         if (pollTimer) {
             clearInterval(pollTimer);
             pollTimer = null;
+        }
+        if (statsTimer) {
+            clearInterval(statsTimer);
+            statsTimer = null;
         }
     }
 
@@ -357,6 +414,9 @@
             try { localStorage.setItem(SCALE_STORAGE_KEY, currentScale); } catch (e) {}
             if (lastServerData) {
                 updateAqiBanner(lastServerData.live, Boolean(lastServerData.meta && lastServerData.meta.has_data));
+            }
+            if (lastRollingStats) {
+                renderRolling24h(lastRollingStats);
             }
         });
     }

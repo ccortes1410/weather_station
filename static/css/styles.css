@@ -607,6 +607,185 @@ body {
 .level-alert { background: var(--lvl-alert-bg); color: var(--lvl-alert); }
 .level-preemergency { background: var(--lvl-preemergency-bg); color: var(--lvl-preemergency); }
 .level-emergency { background: var(--lvl-emergency-bg); color: var(--lvl-emergency); }
+.level-unknown { background: var(--lvl-unknown-bg); color: var(--lvl-unknown); }
+
+.hidden {
+    display: none !important;
+}
+
+/* 24-Hour Rolling Average Card */
+.rolling-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.subtle-pill {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    border-radius: 999px;
+    vertical-align: middle;
+    margin-left: 6px;
+}
+
+.rolling-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.rolling-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+}
+
+.rolling-val {
+    font-size: 1.45rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.rolling-val small {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.rolling-sub {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* History Filter Bar & Charts */
+.btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    text-decoration: none;
+    background: var(--pm25);
+    color: #ffffff;
+    border: 1px solid transparent;
+    padding: 8px 15px;
+    border-radius: 9px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+}
+
+.btn-primary:hover {
+    opacity: 0.9;
+}
+
+.header-btn-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.filter-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 135px;
+}
+
+.filter-group-sm {
+    min-width: 98px;
+    max-width: 125px;
+}
+
+.preset-pills {
+    display: inline-flex;
+    background: var(--surface-subtle);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 3px;
+    gap: 3px;
+}
+
+.preset-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    font-weight: 700;
+    padding: 5px 11px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.preset-btn:hover {
+    color: var(--text);
+}
+
+.preset-btn.active {
+    background: var(--pm25);
+    color: #ffffff;
+}
+
+.filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.summary-strip {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.summary-mini {
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.summary-big {
+    font-size: 1.65rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.summary-badge-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.history-charts-grid {
+    display: grid;
+    grid-template-columns: 1.45fr 1fr;
+    gap: 18px;
+}
 
 .alert-box {
     padding: 14px 16px;
@@ -649,6 +828,20 @@ body {
 
     .metrics-grid {
         grid-template-columns: 1fr;
+    }
+
+    .rolling-grid,
+    .summary-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .history-charts-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .filter-actions {
+        margin-left: 0;
+        width: 100%;
     }
 }
 

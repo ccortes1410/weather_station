@@ -90,6 +90,38 @@
     </article>
 </section>
 
+<!-- 24-Hour Official Rolling Average Strip -->
+<section class="card rolling-card" id="rolling-24h-card">
+    <div class="rolling-header">
+        <div>
+            <h2 class="section-title">24-Hour Rolling Average <span class="subtle-pill">Official Standard Basis</span></h2>
+            <p class="section-subtitle" id="rolling-subtitle">Computed from TiDB historical readings (cached 5m)</p>
+        </div>
+        <span class="table-badge level-unknown" id="rolling-badge">Loading...</span>
+    </div>
+    <div class="rolling-grid">
+        <div class="rolling-metric">
+            <span class="stat-label">24h Avg PM 1.0</span>
+            <span class="rolling-val pm1-color" id="r24-pm1">-- <small>&micro;g/m&sup3;</small></span>
+        </div>
+        <div class="rolling-metric">
+            <span class="stat-label">24h Avg PM 2.5</span>
+            <span class="rolling-val pm25-color" id="r24-pm25">-- <small>&micro;g/m&sup3;</small></span>
+            <span class="rolling-sub" id="r24-pm25-range">Min -- &middot; Max --</span>
+        </div>
+        <div class="rolling-metric">
+            <span class="stat-label">24h Avg PM 10</span>
+            <span class="rolling-val pm10-color" id="r24-pm10">-- <small>&micro;g/m&sup3;</small></span>
+            <span class="rolling-sub" id="r24-pm10-range">Min -- &middot; Max --</span>
+        </div>
+        <div class="rolling-metric">
+            <span class="stat-label">24h Peak Hour</span>
+            <span class="rolling-val" id="r24-peak">--</span>
+            <span class="rolling-sub" id="r24-samples">0 readings</span>
+        </div>
+    </div>
+</section>
+
 <!-- Live Chart Card -->
 <section class="card chart-card">
     <div class="chart-header">
