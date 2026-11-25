@@ -1,5 +1,6 @@
 import os
-from datetime import datetime, timezone
+import time
+from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,7 +17,7 @@ TIDB_HOST = os.getenv("DB_HOST")
 TIDB_USER = os.getenv("DB_USERNAME")
 TIDB_PASSWORD = os.getenv("DB_PASSWORD")
 
-db_config = {
+db_config: Dict[str, Any] = {
     'host': TIDB_HOST,
     'user': TIDB_USER,
     'password': TIDB_PASSWORD,
@@ -32,23 +33,23 @@ LIVE_BUFFER_CAPACITY = 300
 ONLINE_THRESHOLD_SEC = 30
 STALE_THRESHOLD_SEC = 300
 
-latest_live_data = {
+latest_live_data: Dict[str, Any] = {
     'time_full': 'Waiting for Pico...',
     'pm1': 0,
     'pm25': 0,
     'pm10': 0
 }
-live_chart_buffer = []
-last_received_utc = None
+live_chart_buffer: List[Dict[str, Any]] = []
+last_received_ts: Optional[float] = None
 
 
-def get_db_connection():
+def get_db_connection() -> Any:
     return mysql.connector.connect(**db_config)
 
 
-def compute_sensor_meta():
-    """Compute online/stale/offline status from server-side UTC receipt time."""
-    if last_received_utc is None:
+def compute_sensor_meta() -> Dict[str, Any]:
+    """Compute online/stale/offline status from server-side UTC epoch receipt time."""
+    if last_received_ts is None:
         return {
             'status': 'offline',
             'has_data': False,
@@ -59,8 +60,7 @@ def compute_sensor_meta():
             'poll_interval_ms': 5000
         }
 
-    now_utc = datetime.now(timezone.utc)
-    elapsed = max(0, int((now_utc - last_received_utc).total_seconds()))
+    elapsed = max(0, int(time.time() - last_received_ts))
 
     if elapsed <= ONLINE_THRESHOLD_SEC:
         status = 'online'
@@ -69,30 +69,38 @@ def compute_sensor_meta():
     else:
         status = 'offline'
 
+    t = time.gmtime(int(last_received_ts))
+    iso_utc = f"{t[0]:04d}-{t[1]:02d}-{t[2]:02d}T{t[3]:02d}:{t[4]:02d}:{t[5]:02d}Z"
+
     return {
         'status': status,
         'has_data': True,
         'seconds_since_update': elapsed,
-        'last_received_utc': last_received_utc.isoformat(),
+        'last_received_utc': iso_utc,
         'buffer_size': len(live_chart_buffer),
         'buffer_capacity': LIVE_BUFFER_CAPACITY,
         'poll_interval_ms': 5000
     }
 
 
-def compute_session_stats():
+def compute_session_stats() -> Optional[Dict[str, Any]]:
     """Compute min/avg/max across the current in-memory live chart buffer."""
     if not live_chart_buffer:
         return None
 
-    stats = {'count': len(live_chart_buffer)}
+    stats: Dict[str, Any] = {'count': len(live_chart_buffer)}
     for key in ('pm1', 'pm25', 'pm10'):
-        values = [row[key] for row in live_chart_buffer if isinstance(row.get(key), (int, float))]
+        values: List[float] = []
+        for row in live_chart_buffer:
+            val = row.get(key)
+            if isinstance(val, (int, float)) and not isinstance(val, bool):
+                values.append(float(val))
+
         if values:
             stats[key] = {
-                'min': min(values),
+                'min': int(min(values)),
                 'avg': round(sum(values) / len(values), 1),
-                'max': max(values)
+                'max': int(max(values))
             }
         else:
             stats[key] = {'min': 0, 'avg': 0.0, 'max': 0}
@@ -123,7 +131,7 @@ def get_dashboard_data():
 
 @app.route('/api/sensor', methods=['POST'])
 def receive_data():
-    global latest_live_data, live_chart_buffer, last_received_utc
+    global latest_live_data, live_chart_buffer, last_received_ts
 
     # Security Check
     if request.headers.get('X-API-Key') != API_SECRET_KEY:
@@ -136,10 +144,10 @@ def receive_data():
 
     # SCENARIO A: Pico sent a live ping (Dictionary)
     if isinstance(data, dict):
-        timestamp_str = str(data.get('timestamp', ''))
-        pm1 = int(data.get('pm1', 0))
-        pm25 = int(data.get('pm25', 0))
-        pm10 = int(data.get('pm10', 0))
+        timestamp_str = str(data.get('timestamp') or '')
+        pm1 = int(data.get('pm1') or 0)
+        pm25 = int(data.get('pm25') or 0)
+        pm10 = int(data.get('pm10') or 0)
 
         latest_live_data = {
             'time_full': timestamp_str,
@@ -147,7 +155,7 @@ def receive_data():
             'pm25': pm25,
             'pm10': pm10
         }
-        last_received_utc = datetime.now(timezone.utc)
+        last_received_ts = time.time()
 
         # Add to the scrolling chart
         time_short = timestamp_str.split(' ')[1] if ' ' in timestamp_str else timestamp_str
@@ -185,9 +193,9 @@ def receive_data():
             print(f"MySQL Error: {err}")
             return jsonify({"error": "Database error"}), 400
         finally:
-            if cursor:
+            if cursor is not None:
                 cursor.close()
-            if conn:
+            if conn is not None:
                 conn.close()
 
     return jsonify({"error": "Format unknown"}), 400
@@ -205,8 +213,8 @@ def home():
 def view_history():
     conn = None
     cursor = None
-    rows = []
-    db_error = None
+    rows: List[Dict[str, Any]] = []
+    db_error: Optional[str] = None
 
     try:
         conn = get_db_connection()
@@ -219,9 +227,9 @@ def view_history():
     except mysql.connector.Error as err:
         db_error = str(err)
     finally:
-        if cursor:
+        if cursor is not None:
             cursor.close()
-        if conn:
+        if conn is not None:
             conn.close()
 
     return render_template(
